@@ -1,10 +1,4 @@
-import {
-  normalizePlate,
-  plateKey,
-  plateLetters,
-  plateSearchText,
-  toWesternDigits,
-} from './plate.js'
+import { normalizePlate, plateKey, plateLetters, plateSearchText } from './plate.js'
 
 export const statuses = ['Available', 'In Use', 'Maintenance']
 export const minimumYear = 1900
@@ -91,7 +85,7 @@ export function validateCar(car, cars = [], editingId = null) {
   const plate = normalizePlate(car.plate)
   if (
     plate.letters.length !== 3 ||
-    ![...plate.letters].every((letter) => Object.hasOwn(plateLetters, letter))
+    ![...plate.letters].every((letter) => plateLetters.includes(letter))
   )
     errors.letters = 'errorLetters'
   if (!/^[0-9]{1,4}$/.test(plate.digits)) errors.digits = 'errorDigits'
@@ -99,7 +93,7 @@ export function validateCar(car, cars = [], editingId = null) {
     if (!car[field]?.trim()) errors[field] = 'errorRequired'
     else if (car[field].trim().length > 60) errors[field] = 'errorLength'
   }
-  const yearText = toWesternDigits(String(car.year)).trim()
+  const yearText = String(car.year).trim()
   const year = Number(yearText)
   if (
     !/^\d{4}$/.test(yearText) ||
@@ -129,7 +123,7 @@ export class VehicleValidationError extends Error {
   }
 }
 
-// Immutable collection operations: a future service can use these without coupling to UI.
+// Pure collection operations for frontend tests.
 export function saveCar(cars, car, editingId = null) {
   const errors = validateCar(car, cars, editingId)
   if (editingId && !cars.some((item) => item.id === editingId)) errors.form = 'errorMissing'
@@ -139,7 +133,7 @@ export function saveCar(cars, car, editingId = null) {
     plate: normalizePlate(car.plate),
     make: car.make.trim(),
     model: car.model.trim(),
-    year: Number(toWesternDigits(String(car.year)).trim()),
+    year: Number(String(car.year).trim()),
     status: car.status,
     employee: (car.employee ?? '').trim(),
     notes: (car.notes ?? '').trim(),
@@ -152,13 +146,13 @@ export function deleteCar(cars, id) {
 }
 
 export function searchCars(cars, query, status = 'All') {
-  const text = toWesternDigits(query.trim()).toLocaleLowerCase()
+  const text = query.trim().toLowerCase()
   const plateText = plateSearchText(text)
   return cars.filter((car) => {
     const plateForms = [plateKey(car.plate), `${car.plate.digits}:${car.plate.letters}`]
     const matchesText =
       !text ||
-      [car.make, car.model, car.year, car.employee, car.notes].some((value) =>
+      [car.id, car.make, car.model, car.year, car.employee, car.notes].some((value) =>
         String(value).toLocaleLowerCase().includes(text),
       ) ||
       (plateText && plateForms.some((value) => plateSearchText(value).includes(plateText)))
@@ -166,12 +160,12 @@ export function searchCars(cars, query, status = 'All') {
   })
 }
 
-export function sortCars(cars, sort = 'newest', language = 'en') {
+export function sortCars(cars, sort = 'newest') {
   const result = [...cars]
   if (sort === 'newest') return result.reverse()
   if (sort === 'year') return result.sort((a, b) => b.year - a.year)
   return result.sort((a, b) =>
-    `${a.make} ${a.model}`.localeCompare(`${b.make} ${b.model}`, language),
+    `${a.make} ${a.model}`.localeCompare(`${b.make} ${b.model}`, 'en-GB'),
   )
 }
 

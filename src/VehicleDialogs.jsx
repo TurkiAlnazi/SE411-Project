@@ -1,14 +1,15 @@
 import { useState } from 'react'
 import { Dialog, Icon, SaudiPlate, StatusBadge } from './components.jsx'
 import { emptyCar, maximumYear, minimumYear, statuses, validateCar } from './fleet.js'
-import { formatNumber } from './i18n.js'
+import { formatNumber } from './labels.js'
 
-export function VehicleForm({ car, cars, onSave, ...dialogProps }) {
-  const { t, language, onClose } = dialogProps
+export function VehicleForm({ car, onSave, ...dialogProps }) {
+  const { t, onClose } = dialogProps
   const [form, setForm] = useState(() => (car ? { ...car, plate: { ...car.plate } } : emptyCar()))
   const [errors, setErrors] = useState({})
+  const [busy, setBusy] = useState(false)
   const errorMessage = (key) =>
-    t(key, { min: formatNumber(minimumYear, language), max: formatNumber(maximumYear(), language) })
+    t(key, { min: formatNumber(minimumYear), max: formatNumber(maximumYear()) })
   function update(event) {
     const { name, value } = event.target
     setForm((current) =>
@@ -17,15 +18,27 @@ export function VehicleForm({ car, cars, onSave, ...dialogProps }) {
         : { ...current, [name]: value },
     )
   }
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault()
-    const nextErrors = validateCar(form, cars, car?.id)
+    if (busy) return
+    const formElement = event.currentTarget
+    const nextErrors = validateCar(form)
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length) {
-      event.currentTarget.elements.namedItem(Object.keys(nextErrors)[0])?.focus()
+      formElement.elements.namedItem(Object.keys(nextErrors)[0])?.focus()
       return
     }
-    onSave(form, car?.id)
+
+    setBusy(true)
+    try {
+      await onSave(form, car?.id)
+    } catch (error) {
+      const fields = error.fields ?? {}
+      setErrors(Object.keys(fields).length ? fields : { form: error.code ?? 'errorConnection' })
+      formElement.elements.namedItem(Object.keys(fields)[0])?.focus()
+    } finally {
+      setBusy(false)
+    }
   }
   function field(name, options = {}) {
     const errorId = errors[name] ? `${name}-error` : undefined
@@ -63,15 +76,19 @@ export function VehicleForm({ car, cars, onSave, ...dialogProps }) {
     )
   }
   return (
-    <Dialog {...dialogProps} title={t(car ? 'editVehicle' : 'addVehicle')}>
+    <Dialog
+      {...dialogProps}
+      onClose={() => !busy && onClose()}
+      title={t(car ? 'editVehicle' : 'addVehicle')}
+    >
       <p className="modal-subtitle">
         {t('formSubtitle')} <span>{t('requiredHint')}</span>
       </p>
-      <form onSubmit={submit} noValidate>
+      <form onSubmit={submit} aria-busy={busy} noValidate>
         {Object.keys(errors).length > 0 && (
           <div className="error-summary" role="alert">
             <Icon name="info" />
-            <span>{t('errorHeading')}</span>
+            <span>{t(errors.form ?? 'errorHeading')}</span>
           </div>
         )}
         <div className="form-grid">
@@ -168,12 +185,12 @@ export function VehicleForm({ car, cars, onSave, ...dialogProps }) {
           </div>
         </div>
         <div className="form-actions">
-          <button type="button" className="secondary" onClick={onClose}>
+          <button type="button" className="secondary" onClick={onClose} disabled={busy}>
             {t('cancel')}
           </button>
-          <button type="submit" className="primary">
+          <button type="submit" className="primary" disabled={busy}>
             <Icon name={car ? 'check' : 'plus'} />
-            {t(car ? 'saveChanges' : 'addVehicle')}
+            {t(busy ? 'saving' : car ? 'saveChanges' : 'addVehicle')}
           </button>
         </div>
       </form>
@@ -182,7 +199,7 @@ export function VehicleForm({ car, cars, onSave, ...dialogProps }) {
 }
 
 export function VehicleDetails({ car, onEdit, ...dialogProps }) {
-  const { t, language } = dialogProps
+  const { t } = dialogProps
   return (
     <Dialog {...dialogProps} title={t('detailsTitle')}>
       <div className="details-hero">
@@ -206,7 +223,7 @@ export function VehicleDetails({ car, onEdit, ...dialogProps }) {
         {[
           ['make', car.make],
           ['model', car.model],
-          ['year', formatNumber(car.year, language)],
+          ['year', formatNumber(car.year)],
           ['employee', car.employee || t('unassigned')],
           ['notes', car.notes || t('noNotes')],
           ['recordId', car.id],
@@ -231,8 +248,29 @@ export function VehicleDetails({ car, onEdit, ...dialogProps }) {
 
 export function DeleteConfirmation({ car, onDelete, ...dialogProps }) {
   const { t, onClose } = dialogProps
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function confirm() {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      await onDelete(car)
+    } catch (failure) {
+      setError(failure.code ?? 'errorConnection')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <Dialog {...dialogProps} className="delete-dialog" title={t('deleteTitle')}>
+    <Dialog
+      {...dialogProps}
+      onClose={() => !busy && onClose()}
+      className="delete-dialog"
+      title={t('deleteTitle')}
+    >
       <p className="delete-description">
         {t('deleteBody', {
           car: `${car.make} ${car.model} (${car.plate.letters} ${car.plate.digits})`,
@@ -241,13 +279,18 @@ export function DeleteConfirmation({ car, onDelete, ...dialogProps }) {
       <div className="plate-preview">
         <SaudiPlate plate={car.plate} t={t} />
       </div>
+      {error && (
+        <p className="error-summary" role="alert">
+          {t(error)}
+        </p>
+      )}
       <div className="form-actions">
-        <button className="secondary" data-initial-focus="" onClick={onClose}>
+        <button className="secondary" data-initial-focus="" onClick={onClose} disabled={busy}>
           {t('cancel')}
         </button>
-        <button className="danger" onClick={() => onDelete(car)}>
+        <button className="danger" onClick={confirm} disabled={busy}>
           <Icon name="trash" />
-          {t('deleteConfirm')}
+          {t(busy ? 'saving' : 'deleteConfirm')}
         </button>
       </div>
     </Dialog>

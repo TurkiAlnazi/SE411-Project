@@ -11,15 +11,7 @@ import {
   validateCar,
   VehicleValidationError,
 } from './fleet.js'
-import {
-  arabicLetters,
-  normalizePlate,
-  plateKey,
-  plateLetters,
-  toArabicDigits,
-  toWesternDigits,
-} from './plate.js'
-import { translations, translate } from './i18n.js'
+import { normalizePlate, plateKey, plateLetters } from './plate.js'
 
 const sample = (overrides = {}) => ({
   ...emptyCar(),
@@ -76,11 +68,10 @@ describe('immutable vehicle operations', () => {
 })
 
 describe('structured Saudi-style plates', () => {
-  it.each(Object.entries(plateLetters))('supports and converts %s to %s', (latin, arabic) => {
-    expect(arabicLetters(latin)).toEqual([arabic])
-    expect(validateCar(sample({ plate: { letters: latin.repeat(3), digits: '1' } }))).toEqual({})
+  it.each([...plateLetters])('accepts supported letter %s', (letter) => {
+    expect(validateCar(sample({ plate: { letters: letter.repeat(3), digits: '1' } }))).toEqual({})
   })
-  it.each(['ABC', 'CDE', 'FFF', 'III', 'MOP', 'QWY', '123', 'AB', 'ABJJ', 'ا ب ح'])(
+  it.each(['ABC', 'CDE', 'FFF', 'III', 'MOP', 'QWY', '123', 'AB', 'ABJJ'])(
     'rejects unsupported/invalid letters %s',
     (letters) => {
       expect(validateCar(sample({ plate: { letters, digits: '12' } })).letters).toBe('errorLetters')
@@ -89,20 +80,18 @@ describe('structured Saudi-style plates', () => {
   it.each(['', '12345', '12a', '-1', '1.2', '1 2'])('rejects invalid digits %s', (digits) => {
     expect(validateCar(sample({ plate: { letters: 'ABJ', digits } })).digits).toBe('errorDigits')
   })
-  it('normalizes casing, whitespace and Arabic digits for duplicate checks', () => {
+  it('normalizes casing and whitespace for duplicate checks', () => {
     const cars = saveCar([], sample())
-    const variant = sample({ plate: { letters: ' a b j ', digits: ' ٠٠١٢ ' } })
+    const variant = sample({ plate: { letters: ' a b j ', digits: ' 0012 ' } })
     expect(plateKey(variant.plate)).toBe('ABJ:0012')
     expect(validateCar(variant, cars).letters).toBe('errorDuplicate')
     expect(() => saveCar(cars, variant)).toThrow(VehicleValidationError)
   })
-  it('preserves leading zeroes in storage and both digit systems', () => {
-    expect(normalizePlate({ letters: 'abj', digits: '٠٠١٢' })).toEqual({
+  it('preserves leading zeros in the plate and its duplicate key', () => {
+    expect(normalizePlate({ letters: 'abj', digits: '0012' })).toEqual({
       letters: 'ABJ',
       digits: '0012',
     })
-    expect(toArabicDigits('0012')).toBe('٠٠١٢')
-    expect(toWesternDigits('٠١٢٣٤٥٦٧٨٩')).toBe('0123456789')
     expect(plateKey({ letters: 'ABJ', digits: '0012' })).not.toBe(
       plateKey({ letters: 'ABJ', digits: '12' }),
     )
@@ -123,8 +112,8 @@ describe('validation', () => {
       expect(validateCar(sample({ year })).year).toBe('errorYear')
     },
   )
-  it('accepts both year bounds and Arabic year digits', () => {
-    for (const year of [1900, maximumYear(), '٢٠٢٤'])
+  it('accepts both year bounds and a four-digit string', () => {
+    for (const year of [1900, maximumYear(), '2024'])
       expect(validateCar(sample({ year }))).toEqual({})
   })
   it('requires an employee only for In Use', () => {
@@ -143,24 +132,16 @@ describe('validation', () => {
 })
 
 describe('search, filtering and sorting', () => {
-  it.each([
-    'abj',
-    'ا ب ح',
-    '1234',
-    '١٢٣٤',
-    'ABJ 1234',
-    'ا ب ح ١٢٣٤',
-    '1234 ABJ',
-    '١٢٣٤ ا ب ح',
-    'CAMRY',
-    'Rami',
-  ])('finds the correct vehicle for %s', (query) => {
-    expect(searchCars(initialCars, query).map((car) => car.id)).toEqual(['car-1'])
-  })
-  it('handles H/tatweel, leading zeroes, Arabic years and notes', () => {
-    expect(searchCars(initialCars, 'ق ك هـ')[0].id).toBe('car-3')
-    expect(searchCars(initialCars, '٠٤٢١')[0].id).toBe('car-4')
-    expect(searchCars(initialCars, '٢٠٢٣')[0].id).toBe('car-2')
+  it.each(['abj', '1234', 'ABJ 1234', 'A B J 1234', 'ABJ:1234', '1234 ABJ', 'CAMRY', 'Rami'])(
+    'finds the correct vehicle for %s',
+    (query) => {
+      expect(searchCars(initialCars, query).map((car) => car.id)).toEqual(['car-1'])
+    },
+  )
+  it('matches spaced letters, plate zeros, years and notes', () => {
+    expect(searchCars(initialCars, 'G K H')[0].id).toBe('car-3')
+    expect(searchCars(initialCars, '0421')[0].id).toBe('car-4')
+    expect(searchCars(initialCars, '2023')[0].id).toBe('car-2')
     expect(searchCars([{ ...initialCars[0], notes: 'Spare key' }], 'spare')).toHaveLength(1)
   })
   it('combines status with search and handles empty results', () => {
@@ -174,18 +155,5 @@ describe('search, filtering and sorting', () => {
     expect(sortCars(initialCars, 'name')[0].make).toBe('Ford')
     expect(sortCars(initialCars, 'year')[0].year).toBe(2025)
     expect(initialCars[0].id).toBe('car-1')
-  })
-})
-
-describe('translation contract', () => {
-  it('has identical keys, placeholders and nonempty translations in both languages', () => {
-    expect(Object.keys(translations.ar).sort()).toEqual(Object.keys(translations.en).sort())
-    for (const key of Object.keys(translations.en)) {
-      expect(translations.ar[key].trim()).not.toBe('')
-      expect((translations.ar[key].match(/\{\w+\}/g) ?? []).sort()).toEqual(
-        (translations.en[key].match(/\{\w+\}/g) ?? []).sort(),
-      )
-    }
-    expect(translate('ar', 'added', { car: 'Toyota' })).toBe('أُضيفت Toyota إلى الأسطول.')
   })
 })

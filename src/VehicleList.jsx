@@ -1,15 +1,7 @@
 import { Icon, SaudiPlate, StatusBadge } from './components.jsx'
-import { formatNumber } from './i18n.js'
+import { formatNumber } from './labels.js'
 
-export default function VehicleList({
-  cars,
-  t,
-  language,
-  onView,
-  onEdit,
-  onDelete,
-  compact = false,
-}) {
+export default function VehicleList({ cars, t, onView, onEdit, onDelete, compact = false }) {
   return (
     <div className="vehicle-table-wrap">
       <table className={`vehicle-table ${compact ? 'compact' : ''}`} role="table">
@@ -43,7 +35,7 @@ export default function VehicleList({
                         <bdi>{name}</bdi>
                       </button>
                       <span className="vehicle-year">
-                        {t('year')} · {formatNumber(car.year, language)}
+                        {t('year')} · {formatNumber(car.year)}
                       </span>
                     </div>
                   </div>

@@ -3,7 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import App from './App.jsx'
 import { SaudiPlate } from './components.jsx'
-import { translate } from './i18n.js'
+import { label } from './labels.js'
+import { FleetApiError } from './api.js'
+import { createTestFleetApi } from './test/createTestFleetApi.js'
+
+function renderApp(api = createTestFleetApi()) {
+  return render(<App api={api} />)
+}
 
 async function addExample(user) {
   await user.click(screen.getByRole('button', { name: 'Add vehicle' }))
@@ -19,14 +25,14 @@ async function addExample(user) {
 describe('Fleetline user interactions', () => {
   it('adds, views, edits, cancels deletion and deletes a vehicle through the UI', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    renderApp()
     await addExample(user)
-    expect(screen.getByText('Lexus ES was added to the fleet.')).toBeInTheDocument()
+    expect(await screen.findByText('Lexus ES was added to the fleet.')).toBeInTheDocument()
     expect(
-      within(screen.getByRole('region', { name: 'Total cars' })).getByText('07'),
+      within(await screen.findByRole('region', { name: 'Total cars' })).getByText('07'),
     ).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
-    const view = screen.getAllByRole('button', { name: 'View Lexus ES · ABK 0077' })[0]
+    const view = (await screen.findAllByRole('button', { name: 'View Lexus ES · ABK 0077' }))[0]
     await user.click(view)
     let dialog = within(screen.getByRole('dialog'))
     expect(dialog.getByText('<script>literal text</script>')).toBeInTheDocument()
@@ -36,90 +42,85 @@ describe('Fleetline user interactions', () => {
     await user.selectOptions(dialog.getByLabelText(/^Status/), 'In Use')
     await user.type(dialog.getByLabelText(/^Assigned employee/), 'Mazen Alward')
     await user.click(dialog.getByRole('button', { name: 'Save changes' }))
-    expect(screen.getByText('Lexus ES was updated.')).toBeInTheDocument()
-    expect(screen.getByText('Mazen Alward')).toBeInTheDocument()
+    expect(await screen.findByText('Lexus ES was updated.')).toBeInTheDocument()
+    expect(await screen.findByText('Mazen Alward')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Delete Lexus ES · ABK 0077' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('Lexus ES (ABK 0077)')
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
-    expect(screen.getByText('Mazen Alward')).toBeInTheDocument()
+    expect(await screen.findByText('Mazen Alward')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Delete Lexus ES · ABK 0077' }))
     await user.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete vehicle' }),
     )
     expect(screen.queryByText('Mazen Alward')).not.toBeInTheDocument()
     expect(screen.getByText('Lexus ES was deleted.')).toBeInTheDocument()
-    expect(screen.getByText('Showing 6 of 6 cars')).toBeInTheDocument()
+    expect(await screen.findByText('Showing 3 of 6 cars')).toBeInTheDocument()
   })
 
-  it('retains filters, sort and unsaved input when language switches, and translates errors', async () => {
+  it('retains filters and sort after an incomplete form is canceled', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    renderApp()
     await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
     await user.type(screen.getByLabelText('Search vehicles'), 'Toyota')
     await user.selectOptions(screen.getByLabelText('Filter by status'), 'Available')
     await user.selectOptions(screen.getByLabelText('Sort vehicles'), 'year')
-    expect(screen.getByText('Showing 1 of 6 cars')).toBeInTheDocument()
+    expect(await screen.findByText('Showing 1 of 6 cars')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Add vehicle' }))
-    let dialog = within(screen.getByRole('dialog'))
+    const dialog = within(screen.getByRole('dialog'))
     await user.type(dialog.getByLabelText(/Plate letters/), 'ABK')
     await user.type(dialog.getByLabelText(/^Make/), 'Draft')
-    await user.click(dialog.getByRole('button', { name: 'العربية' }))
-    dialog = within(screen.getByRole('dialog'))
-    expect(document.documentElement).toHaveAttribute('lang', 'ar')
-    expect(document.documentElement).toHaveAttribute('dir', 'rtl')
-    expect(dialog.getByLabelText(/حروف اللوحة/)).toHaveValue('ABK')
-    expect(dialog.getByLabelText(/الشركة المصنعة/)).toHaveValue('Draft')
-    await user.click(dialog.getByRole('button', { name: 'إضافة سيارة' }))
-    expect(dialog.getByRole('alert')).toHaveTextContent('يرجى مراجعة الحقول المحددة.')
+    await user.click(dialog.getByRole('button', { name: 'Add vehicle' }))
+    expect(dialog.getByRole('alert')).toHaveTextContent('Please check the highlighted fields.')
     expect(
-      dialog.getByText('أدخل من رقم إلى أربعة أرقام. تُحفظ الأصفار في البداية.'),
+      dialog.getByText('Enter one to four digits. Leading zeros are kept.'),
     ).toBeInTheDocument()
-    await user.click(dialog.getByRole('button', { name: 'إلغاء' }))
-    expect(screen.getByLabelText('البحث عن السيارات')).toHaveValue('Toyota')
-    expect(screen.getByLabelText('تصفية حسب الحالة')).toHaveValue('Available')
-    expect(screen.getByLabelText('ترتيب السيارات')).toHaveValue('year')
-    expect(screen.getByText('عرض ١ من أصل ٦ سيارة')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'English' }))
-    expect(document.documentElement).toHaveAttribute('dir', 'ltr')
+    expect(dialog.getByLabelText(/^Make/)).toHaveValue('Draft')
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByLabelText('Search vehicles')).toHaveValue('Toyota')
+    expect(screen.getByLabelText('Filter by status')).toHaveValue('Available')
+    expect(screen.getByLabelText('Sort vehicles')).toHaveValue('year')
+    expect(await screen.findByText('Showing 1 of 6 cars')).toBeInTheDocument()
   })
 
   it('shows duplicate validation and keeps an existing record unchanged when edit is canceled', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    renderApp()
     await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
-    await user.click(screen.getByRole('button', { name: 'Edit Kia K5 · RVE 7350' }))
+    await user.click(await screen.findByRole('button', { name: 'Edit Kia K5 · RVE 7350' }))
     const dialog = within(screen.getByRole('dialog'))
     await user.clear(dialog.getByLabelText(/Plate letters/))
     await user.type(dialog.getByLabelText(/Plate letters/), ' abj ')
     await user.clear(dialog.getByLabelText(/Plate digits/))
     await user.type(dialog.getByLabelText(/Plate digits/), '1234')
     await user.click(dialog.getByRole('button', { name: 'Save changes' }))
-    expect(dialog.getByText('This plate is already registered in your fleet.')).toBeInTheDocument()
+    expect(
+      await dialog.findByText('This plate is already registered in your fleet.'),
+    ).toBeInTheDocument()
     expect(dialog.getByLabelText(/Plate letters/)).toHaveFocus()
     await user.click(dialog.getByRole('button', { name: 'Cancel' }))
     expect(screen.getByRole('button', { name: 'Edit Kia K5 · RVE 7350' })).toBeInTheDocument()
   })
 
-  it('searches Arabic plates, filters, clears empty results, and sorts the visible rows', async () => {
+  it('searches plates, filters, clears empty results, and sorts the visible rows', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    renderApp()
     await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
-    await user.type(screen.getByLabelText('Search vehicles'), 'ا ب ح ١٢٣٤')
-    expect(screen.getByText('Toyota Camry')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Search vehicles'), 'A B J 1234')
+    expect(await screen.findByText('Toyota Camry')).toBeInTheDocument()
     expect(screen.queryByText('Kia K5')).not.toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText('Filter by status'), 'Maintenance')
-    expect(screen.getByText('No cars match your search.')).toBeInTheDocument()
+    expect(await screen.findByText('No cars match your search.')).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: 'Clear filters' })[0])
     expect(screen.getByLabelText('Search vehicles')).toHaveValue('')
     expect(screen.getByLabelText('Filter by status')).toHaveValue('All')
     await user.selectOptions(screen.getByLabelText('Sort vehicles'), 'name')
-    const rows = within(screen.getByRole('table')).getAllByRole('row')
+    const rows = within(await screen.findByRole('table')).getAllByRole('row')
     expect(rows[1]).toHaveTextContent('Ford Explorer')
   })
 
   it('restores focus on dialog cancellation and renders only the supplied team', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    renderApp()
     const add = screen.getByRole('button', { name: 'Add vehicle' })
     await user.click(add)
     expect(within(screen.getByRole('dialog')).getByLabelText(/Plate letters/)).toHaveFocus()
@@ -134,79 +135,93 @@ describe('Fleetline user interactions', () => {
     expect(screen.getByText('Faisal Alghubaini')).toBeInTheDocument()
     expect(screen.getByText('219211021')).toBeInTheDocument()
     expect(screen.queryByText(/ADD MEMBER/)).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'العربية' }))
-    expect(screen.getByText('تركي العنزي')).toBeInTheDocument()
-    expect(screen.getByText('محمد الهندي')).toBeInTheDocument()
-    expect(screen.getByText('فيصل الغبيني')).toBeInTheDocument()
   })
 
   it('handles deleting the entire fleet with zero counts and actionable empty states', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    renderApp()
     await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
     for (let index = 0; index < 6; index += 1) {
-      await user.click(screen.getAllByRole('button', { name: /^Delete / })[0])
+      await user.click((await screen.findAllByRole('button', { name: /^Delete / }))[0])
       await user.click(
         within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete vehicle' }),
       )
     }
-    expect(screen.getByText('Your fleet starts here.')).toBeInTheDocument()
+    expect(await screen.findByText('Your fleet starts here.')).toBeInTheDocument()
     expect(screen.getByText('Showing 0 of 0 cars')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Dashboard' }))
     expect(
-      within(screen.getByRole('region', { name: 'Total cars' })).getByText('00'),
+      within(await screen.findByRole('region', { name: 'Total cars' })).getByText('00'),
     ).toBeInTheDocument()
     expect(screen.getByText('No cars available right now')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Add vehicle' })).toHaveLength(2)
   })
 
-  it('persists only language, resets cars on remount and retranslates feedback', async () => {
+  it('loads saved vehicles from the same server after the UI remounts', async () => {
     const user = userEvent.setup()
-    const { unmount } = render(<App />)
+    const api = createTestFleetApi()
+    const { unmount } = renderApp(api)
     await addExample(user)
-    await user.click(screen.getByRole('button', { name: 'العربية' }))
-    expect(screen.getByText('أُضيفت Lexus ES إلى الأسطول.')).toBeInTheDocument()
-    expect(localStorage.getItem('fleetline-language')).toBe('ar')
-    expect(localStorage.length).toBe(1)
+    expect(await screen.findByText('Lexus ES was added to the fleet.')).toBeInTheDocument()
     unmount()
-    render(<App />)
-    expect(document.documentElement).toHaveAttribute('dir', 'rtl')
-    await user.click(screen.getByRole('button', { name: /^السيارات/ }))
-    expect(screen.queryByText('Lexus ES')).not.toBeInTheDocument()
-    expect(screen.getByText('عرض ٦ من أصل ٦ سيارة')).toBeInTheDocument()
+    renderApp(api)
+    await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
+    expect(await screen.findByText('Lexus ES')).toBeInTheDocument()
+    expect(await screen.findByText('Showing 3 of 7 cars')).toBeInTheDocument()
   })
 
-  it('still renders and switches language when local storage is unavailable', async () => {
+  it('requests the next page and opens a car by exact ID independently of the page', async () => {
     const user = userEvent.setup()
-    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('blocked')
-    })
-    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('blocked')
-    })
-    render(<App />)
-    await user.click(screen.getByRole('button', { name: 'العربية' }))
-    expect(document.documentElement).toHaveAttribute('dir', 'rtl')
-    get.mockRestore()
-    set.mockRestore()
+    const api = createTestFleetApi()
+    const list = vi.spyOn(api, 'list')
+    const find = vi.spyOn(api, 'find')
+    renderApp(api)
+    await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
+    expect(await screen.findByText('Page 1 of 2')).toBeInTheDocument()
+    expect(screen.getByText('Kia K5')).toBeInTheDocument()
+    expect(screen.queryByText('Toyota Camry')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(await screen.findByText('Page 2 of 2')).toBeInTheDocument()
+    expect(list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, size: 3 }),
+      expect.anything(),
+    )
+    expect(screen.getByText('Toyota Camry')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+    await user.type(screen.getByLabelText('Record ID'), 'car-4')
+    await user.click(screen.getByRole('button', { name: 'Find by ID' }))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Toyota Corolla')
+    expect(find).toHaveBeenCalledWith('car-4')
+  })
+
+  it('shows missing-ID and connection errors and can retry the list', async () => {
+    const user = userEvent.setup()
+    const api = createTestFleetApi()
+    vi.spyOn(api, 'list').mockRejectedValueOnce(new FleetApiError('errorConnection'))
+    renderApp(api)
+    await user.click(screen.getByRole('button', { name: /^Vehicles/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the fleet server')
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('Page 1 of 2')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Record ID'), 'missing-car')
+    await user.click(screen.getByRole('button', { name: 'Find by ID' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This vehicle is no longer in the fleet',
+    )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
 
-it('keeps plate direction fixed while deriving both scripts from one data source', () => {
-  const t = (key, values) => translate('ar', key, values)
-  render(<SaudiPlate plate={{ letters: 'ABH', digits: '0012' }} t={t} />)
-  const plate = screen.getByRole('img', { name: /A B H/ })
+it('shows the plate number with its leading zeros and the country code', () => {
+  render(<SaudiPlate plate={{ letters: 'ABH', digits: '0012' }} t={label} />)
+  const plate = screen.getByRole('img', { name: /A B H, 0012/ })
   expect(plate).toHaveAttribute('dir', 'ltr')
-  expect(plate).toHaveTextContent('٠٠١٢')
   expect(plate).toHaveTextContent('0012')
-  expect(plate).toHaveTextContent('هـ')
+  expect(plate).toHaveTextContent('KSA')
 })
 
-it('keeps both preview rows at three letters for an invalid long draft', () => {
-  const t = (key, values) => translate('en', key, values)
-  render(<SaudiPlate plate={{ letters: 'ABJH', digits: '0012' }} t={t} />)
-  const plate = screen.getByRole('img')
-  expect(plate.querySelector('.plate-letters.plate-latin')).toHaveTextContent('ABJ')
-  expect(plate.querySelector('.plate-letters.plate-arabic')).toHaveTextContent('ابح')
-  expect(plate).not.toHaveTextContent('هـ')
+it('keeps the preview at three letter positions for an invalid long draft', () => {
+  render(<SaudiPlate plate={{ letters: 'ABJH', digits: '0012' }} t={label} />)
+  expect(screen.getByRole('img').querySelector('.plate-letters')).toHaveTextContent('ABJ')
+  expect(screen.getByRole('img').querySelector('.plate-letters')).not.toHaveTextContent('H')
 })

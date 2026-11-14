@@ -13,7 +13,6 @@ HTMLDialogElement.prototype.close = function () {
 
 afterEach(() => {
   cleanup()
-  localStorage.clear()
   document.documentElement.lang = 'en'
   document.documentElement.dir = 'ltr'
 })

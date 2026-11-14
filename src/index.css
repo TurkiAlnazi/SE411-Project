@@ -79,6 +79,3 @@ button {
   clip-path: none;
   transform: translateY(0);
 }
-[lang='ar'] body {
-  font-family: Tahoma, 'Segoe UI', Arial, sans-serif;
-}

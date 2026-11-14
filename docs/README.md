@@ -1,12 +1,10 @@
-# SE411 Project Documentation
+# Fleetline Documentation
 
-This folder contains the documentation for the SE411 project.
-
-## Documents
-- Project overview and architecture
-- Functional and non-functional requirements
-- Testing plan and test results
-- Code review
-- Team contributions
-
-Please refer to the individual documents for further details.
+- [Architecture](ARCHITECTURE.md)
+- [Requirements](REQUIREMENTS.md)
+- [Code review](CODE_REVIEW.md)
+- [Test plan](TEST_PLAN.md)
+- [Project overview](PROJECT_DOCUMENTATION.md)
+- [Project report](Fleetline-Project-Documentation.docx)
+- [Two-slide presentation](Fleetline-Part-2.pptx)
+- [Implementation and demo guide](../PART_2_GUIDE.md)

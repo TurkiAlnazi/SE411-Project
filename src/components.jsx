@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { arabicLetters, normalizePlate, plateLetters, toArabicDigits } from './plate.js'
+import { normalizePlate, plateLetters } from './plate.js'
 
 const paths = {
   dashboard: (
@@ -54,13 +54,6 @@ const paths = {
     </>
   ),
   close: <path d="m6 6 12 12M6 18 18 6" />,
-  globe: (
-    <>
-      <circle cx="12" cy="12" r="9" />
-      <ellipse cx="12" cy="12" rx="4" ry="9" />
-      <path d="M3 12h18" />
-    </>
-  ),
   calendar: (
     <>
       <rect x="3" y="5" width="18" height="16" rx="2" />
@@ -100,66 +93,29 @@ export function Icon({ name, className = '', ...props }) {
   )
 }
 
-export function LanguageSwitch({ language, onChange, t }) {
-  return (
-    <div className="language-switch" role="group" aria-label={t('language')}>
-      <button
-        type="button"
-        lang="en"
-        aria-pressed={language === 'en'}
-        onClick={() => onChange('en')}
-      >
-        English
-      </button>
-      <span aria-hidden="true" />
-      <button
-        type="button"
-        lang="ar"
-        aria-pressed={language === 'ar'}
-        onClick={() => onChange('ar')}
-      >
-        العربية
-      </button>
-    </div>
-  )
-}
-
 export function SaudiPlate({ plate, t, large = false }) {
   const { letters, digits } = normalizePlate(plate)
-  const latin = [...letters.padEnd(3, '—')]
+  const displayedLetters = [...letters.padEnd(3, '—')]
     .slice(0, 3)
-    .map((letter) => (Object.hasOwn(plateLetters, letter) ? letter : '—'))
-  const arabic = arabicLetters(latin.join(''))
+    .map((letter) => (plateLetters.includes(letter) ? letter : '—'))
+
   return (
     <div
       className={`saudi-plate ${large ? 'plate-large' : ''}`}
       dir="ltr"
       role="img"
-      aria-label={t('plateLabel', { letters: latin.join(' '), digits: digits || '—' })}
+      aria-label={t('plateLabel', { letters: displayedLetters.join(' '), digits: digits || '—' })}
     >
       <div className="plate-main" aria-hidden="true">
-        <div className="plate-digits plate-arabic" lang="ar" dir="ltr">
-          {toArabicDigits(digits) || '—'}
-        </div>
-        <div className="plate-letters plate-arabic" lang="ar">
-          {arabic.map((letter, index) => (
-            <span dir="rtl" key={index}>
-              {letter}
-            </span>
-          ))}
-        </div>
-        <div className="plate-digits plate-latin">{digits || '—'}</div>
-        <div className="plate-letters plate-latin">
-          {latin.map((letter, index) => (
+        <div className="plate-digits">{digits || '—'}</div>
+        <div className="plate-letters">
+          {displayedLetters.map((letter, index) => (
             <span key={index}>{letter}</span>
           ))}
         </div>
       </div>
       <div className="plate-country" aria-hidden="true">
         <span className="plate-country-mark" />
-        <span lang="ar" dir="rtl">
-          السعودية
-        </span>
         <strong>KSA</strong>
       </div>
     </div>
@@ -175,7 +131,7 @@ export function StatusBadge({ status, t }) {
   )
 }
 
-export function Dialog({ title, children, onClose, language, setLanguage, t, className = '' }) {
+export function Dialog({ title, children, onClose, t, className = '' }) {
   const ref = useRef(null)
   useEffect(() => {
     const dialog = ref.current
@@ -221,12 +177,11 @@ export function Dialog({ title, children, onClose, language, setLanguage, t, cla
       }}
     >
       <div className="modal-top">
-        <LanguageSwitch language={language} onChange={setLanguage} t={t} />
+        <h2 id="dialog-title">{title}</h2>
         <button type="button" className="icon-button" onClick={onClose} aria-label={t('close')}>
           <Icon name="close" />
         </button>
       </div>
-      <h2 id="dialog-title">{title}</h2>
       {children}
     </dialog>
   )

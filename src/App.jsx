@@ -1,68 +1,79 @@
-import { useEffect, useState } from 'react'
-import { EmptyState, Icon, LanguageSwitch } from './components.jsx'
+import { useCallback, useEffect, useState } from 'react'
+import { EmptyState, Icon } from './components.jsx'
 import VehicleList from './VehicleList.jsx'
 import { DeleteConfirmation, VehicleDetails, VehicleForm } from './VehicleDialogs.jsx'
-import {
-  deleteCar,
-  fleetCounts,
-  initialCars,
-  saveCar,
-  searchCars,
-  sortCars,
-  statuses,
-} from './fleet.js'
-import { formatNumber, initialLanguage, localeFor, translate } from './i18n.js'
+import { statuses } from './fleet.js'
+import { fleetApi } from './api.js'
+import { useFleetResource } from './useFleetResource.js'
+import { formatNumber as number, label as t } from './labels.js'
 import './App.css'
 
 const statusIcons = { Available: 'check', 'In Use': 'key', Maintenance: 'tool' }
 
-export default function App() {
-  const [language, setLanguage] = useState(initialLanguage)
+const pageSize = 3
+
+export default function App({ api = fleetApi }) {
   const [page, setPage] = useState('dashboard')
-  const [cars, setCars] = useState(() =>
-    initialCars.map((car) => ({ ...car, plate: { ...car.plate } })),
-  )
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('All')
   const [sort, setSort] = useState('newest')
+  const [pageIndex, setPageIndex] = useState(0)
+  const [revision, setRevision] = useState(0)
   const [dialog, setDialog] = useState(null)
   const [feedback, setFeedback] = useState(null)
-  const t = (key, values) => translate(language, key, values)
-  const number = (value) => formatNumber(value, language)
-  const counts = fleetCounts(cars)
-  const results = sortCars(searchCars(cars, query, status), sort, language)
+
+  // One result for dashboard counts; a separate server request for each directory page.
+  const requestSummary = useCallback((signal) => api.summary(signal), [api])
+  const requestPage = useCallback(
+    async (signal) => {
+      const options = { page: pageIndex, size: pageSize, query, status, sort }
+      const response = await api.list(options, signal)
+      const lastPage = Math.max(0, response.totalPages - 1)
+      // A delete or an edit can remove the last result on the current page.
+      return pageIndex > lastPage ? api.list({ ...options, page: lastPage }, signal) : response
+    },
+    [api, pageIndex, query, status, sort],
+  )
+  const summary = useFleetResource(requestSummary, revision)
+  const directory = useFleetResource(requestPage, revision, page === 'vehicles')
+  const counts = summary.data?.counts
+  const total = counts?.total
+  const results = directory.data?.content ?? []
+  const totalPages = directory.data?.totalPages ?? 0
+  const activePage = directory.data?.page ?? pageIndex
+  const refresh = () => setRevision((current) => current + 1)
 
   useEffect(() => {
-    document.documentElement.lang = language
-    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr'
-    document.title = `${translate(language, 'brand')} | ${translate(language, page)}`
-    try {
-      localStorage.setItem('fleetline-language', language)
-    } catch {
-      /* The app also works when storage is blocked. */
-    }
-  }, [language, page])
+    document.title = `${t('brand')} | ${t(page)}`
+  }, [page])
 
   const openAdd = () => setDialog({ type: 'form', car: null })
   const openView = (car) => setDialog({ type: 'details', car })
   const openEdit = (car) => setDialog({ type: 'form', car })
   const openDelete = (car) => setDialog({ type: 'delete', car })
-  const resetFilters = () => {
+  function resetFilters() {
     setQuery('')
     setStatus('All')
+    setPageIndex(0)
   }
-  function handleSave(form, id) {
-    setCars(saveCar(cars, form, id))
-    setFeedback({ key: id ? 'updated' : 'added', car: `${form.make.trim()} ${form.model.trim()}` })
+  async function handleSave(form, id) {
+    const car = await api.save(form, id)
+    if (!id) {
+      resetFilters()
+      setSort('newest')
+    }
+    setFeedback({ key: id ? 'updated' : 'added', car: `${car.make} ${car.model}` })
     setDialog(null)
+    refresh()
   }
-  function handleDelete(car) {
-    setCars((current) => deleteCar(current, car.id))
+  async function handleDelete(car) {
+    await api.remove(car.id)
     setFeedback({ key: 'deleted', car: `${car.make} ${car.model}` })
     setDialog(null)
+    refresh()
   }
-  const listProps = { t, language, onView: openView, onEdit: openEdit, onDelete: openDelete }
-  const dialogProps = { t, language, setLanguage, onClose: () => setDialog(null) }
+  const listProps = { t, onView: openView, onEdit: openEdit, onDelete: openDelete }
+  const dialogProps = { t, onClose: () => setDialog(null) }
 
   return (
     <div className="app">
@@ -93,7 +104,9 @@ export default function App() {
             >
               <Icon name={item === 'vehicles' ? 'car' : item === 'about' ? 'info' : 'dashboard'} />
               <span>{t(item)}</span>
-              {item === 'vehicles' && <span className="nav-count">{number(cars.length)}</span>}
+              {item === 'vehicles' && total !== undefined && (
+                <span className="nav-count">{number(total)}</span>
+              )}
             </button>
           ))}
         </nav>
@@ -116,7 +129,6 @@ export default function App() {
             <span aria-hidden="true">/</span>
             <strong>{t(page)}</strong>
           </div>
-          <LanguageSwitch language={language} onChange={setLanguage} t={t} />
         </header>
         <main id="main-content" tabIndex={-1}>
           <div className="page-heading">
@@ -150,7 +162,10 @@ export default function App() {
               </div>
             )}
           </div>
-          {page === 'dashboard' && (
+          {page === 'dashboard' && !summary.data && (
+            <LoadStatus error={summary.error} t={t} onRetry={refresh} />
+          )}
+          {page === 'dashboard' && summary.data && (
             <>
               <div className="dashboard-meta">
                 <span className="demo-tag">
@@ -159,7 +174,7 @@ export default function App() {
                 </span>
                 <span className="date-label">
                   <Icon name="calendar" />
-                  {new Intl.DateTimeFormat(localeFor(language), {
+                  {new Intl.DateTimeFormat('en-GB', {
                     day: 'numeric',
                     month: 'long',
                     year: 'numeric',
@@ -179,7 +194,7 @@ export default function App() {
                         <Icon name={item === 'total' ? 'car' : statusIcons[item]} />
                       </span>
                     </div>
-                    <strong>{number(counts[item]).padStart(language === 'ar' ? 1 : 2, '0')}</strong>
+                    <strong>{number(counts[item]).padStart(2, '0')}</strong>
                     <p>
                       {t(['totalHint', 'availableHint', 'inUseHint', 'maintenanceHint'][index])}
                     </p>
@@ -200,31 +215,32 @@ export default function App() {
                     onClick={() => {
                       setStatus('Available')
                       setQuery('')
+                      setPageIndex(0)
                       setPage('vehicles')
                     }}
                   >
                     {t('Available')}
-                    <Icon name="arrow" className="directional" />
+                    <Icon name="arrow" />
                   </button>
                 </div>
                 <div className="status-distribution">
                   <div className="distribution-heading">
                     <h3>{t('overview')}</h3>
                     <span>
-                      {number(cars.length)} · {t('totalCars')}
+                      {number(total)} · {t('totalCars')}
                     </span>
                   </div>
                   <div
                     className="distribution-bar"
                     role="img"
-                    aria-label={`${t('fleetComposition')}: ${statuses.map((item) => `${t(item)} ${number(counts[item])}`).join('، ')}`}
+                    aria-label={`${t('fleetComposition')}: ${statuses.map((item) => `${t(item)} ${number(counts[item])}`).join(', ')}`}
                   >
                     {statuses.map((item) => (
                       <span
                         key={item}
                         className={item.toLowerCase().replaceAll(' ', '-')}
                         style={{
-                          width: `${cars.length ? (counts[item] / cars.length) * 100 : 0}%`,
+                          width: `${total ? (counts[item] / total) * 100 : 0}%`,
                         }}
                       />
                     ))}
@@ -237,9 +253,7 @@ export default function App() {
                         <strong>{number(counts[item])}</strong>
                         <span className="share">
                           {t('share', {
-                            percent: number(
-                              cars.length ? Math.round((counts[item] / cars.length) * 100) : 0,
-                            ),
+                            percent: number(total ? Math.round((counts[item] / total) * 100) : 0),
                           })}
                         </span>
                       </div>
@@ -261,16 +275,16 @@ export default function App() {
                     }}
                   >
                     {t('viewAll')}
-                    <Icon name="arrow" className="directional" />
+                    <Icon name="arrow" />
                   </button>
                 </div>
-                {cars.length ? (
-                  <VehicleList {...listProps} cars={sortCars(cars).slice(0, 4)} compact />
+                {summary.data.recent.length ? (
+                  <VehicleList {...listProps} cars={summary.data.recent} compact />
                 ) : (
                   <EmptyState t={t} onAdd={openAdd} />
                 )}
                 <div className="table-footer">
-                  {t('recentCount', { count: number(Math.min(cars.length, 4)) })}
+                  {t('recentCount', { count: number(summary.data.recent.length) })}
                 </div>
               </section>
             </>
@@ -282,8 +296,9 @@ export default function App() {
                   <h2>{t('directory')}</h2>
                   <p>{t('directorySubtitle')}</p>
                 </div>
-                <span className="record-count">{number(cars.length)}</span>
+                {total !== undefined && <span className="record-count">{number(total)}</span>}
               </div>
+              <IdLookup t={t} find={api.find} onFound={openView} />
               <div className="toolbar">
                 <div className="search-field">
                   <Icon name="search" />
@@ -293,14 +308,21 @@ export default function App() {
                   <input
                     id="search"
                     value={query}
-                    onChange={(event) => setQuery(event.target.value)}
+                    onChange={(event) => {
+                      setQuery(event.target.value)
+                      setPageIndex(0)
+                    }}
+                    maxLength={160}
                     placeholder={t('searchPlaceholder')}
                   />
                   {query && (
                     <button
                       className="icon-button"
                       aria-label={t('clearSearch')}
-                      onClick={() => setQuery('')}
+                      onClick={() => {
+                        setQuery('')
+                        setPageIndex(0)
+                      }}
                     >
                       <Icon name="close" />
                     </button>
@@ -313,7 +335,10 @@ export default function App() {
                   <select
                     id="filter-status"
                     value={status}
-                    onChange={(event) => setStatus(event.target.value)}
+                    onChange={(event) => {
+                      setStatus(event.target.value)
+                      setPageIndex(0)
+                    }}
                   >
                     <option value="All">{t('allStatuses')}</option>
                     {statuses.map((item) => (
@@ -327,7 +352,14 @@ export default function App() {
                   <label className="sr-only" htmlFor="sort">
                     {t('sort')}
                   </label>
-                  <select id="sort" value={sort} onChange={(event) => setSort(event.target.value)}>
+                  <select
+                    id="sort"
+                    value={sort}
+                    onChange={(event) => {
+                      setSort(event.target.value)
+                      setPageIndex(0)
+                    }}
+                  >
                     {['newest', 'name', 'yearSort'].map((item, index) => (
                       <option key={item} value={['newest', 'name', 'year'][index]}>
                         {t(item)}
@@ -336,24 +368,58 @@ export default function App() {
                   </select>
                 </div>
               </div>
-              {results.length ? (
+              {!directory.data ? (
+                <LoadStatus error={directory.error} t={t} onRetry={refresh} />
+              ) : results.length ? (
                 <VehicleList {...listProps} cars={results} />
               ) : (
                 <EmptyState
-                  hasCars={cars.length > 0}
+                  hasCars={Boolean(total || query || status !== 'All' || totalPages)}
                   t={t}
                   onAdd={openAdd}
                   onReset={resetFilters}
                 />
               )}
-              <div className="table-footer" role="status">
-                {t('resultCount', { shown: number(results.length), total: number(cars.length) })}
-                {(query || status !== 'All') && (
-                  <button className="text-button" onClick={resetFilters}>
-                    {t('resetFilters')}
+              {directory.data && (
+                <div className="table-footer">
+                  <span role="status">
+                    {t('resultCount', {
+                      shown: number(results.length),
+                      total: number(total ?? directory.data.totalElements),
+                    })}
+                  </span>
+                  {(query || status !== 'All') && (
+                    <button className="text-button" onClick={resetFilters}>
+                      {t('resetFilters')}
+                    </button>
+                  )}
+                </div>
+              )}
+              {(totalPages > 1 || (!directory.data && pageIndex > 0)) && (
+                <nav className="pagination" aria-label={t('pagination')}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={activePage === 0 || !directory.data}
+                    onClick={() => setPageIndex(activePage - 1)}
+                  >
+                    {t('previousPage')}
                   </button>
-                )}
-              </div>
+                  <span aria-live="polite">
+                    {totalPages
+                      ? t('pageOf', { page: number(activePage + 1), total: number(totalPages) })
+                      : t('loadingCars')}
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={activePage + 1 >= totalPages || !directory.data}
+                    onClick={() => setPageIndex(activePage + 1)}
+                  >
+                    {t('nextPage')}
+                  </button>
+                </nav>
+              )}
             </section>
           )}
           {page === 'about' && <About t={t} number={number} />}
@@ -371,7 +437,6 @@ export default function App() {
           key={`form-${dialog.car?.id ?? 'new'}`}
           {...dialogProps}
           car={dialog.car}
-          cars={cars}
           onSave={handleSave}
         />
       )}
@@ -392,6 +457,75 @@ export default function App() {
         />
       )}
     </div>
+  )
+}
+
+function LoadStatus({ error, t, onRetry }) {
+  return (
+    <div className="request-status">
+      {error ? (
+        <>
+          <p role="alert">{t(error)}</p>
+          <button type="button" className="secondary" onClick={onRetry}>
+            {t('retry')}
+          </button>
+        </>
+      ) : (
+        <p role="status">{t('loadingCars')}</p>
+      )}
+    </div>
+  )
+}
+
+function IdLookup({ t, find, onFound }) {
+  const [id, setId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function submit(event) {
+    event.preventDefault()
+    if (busy) return
+    if (!id.trim()) {
+      setError('errorRequired')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      onFound(await find(id.trim()))
+    } catch (failure) {
+      setError(failure.code ?? 'errorConnection')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="id-lookup" onSubmit={submit}>
+      <label htmlFor="find-id">{t('recordId')}</label>
+      <input
+        id="find-id"
+        dir="ltr"
+        value={id}
+        maxLength={80}
+        disabled={busy}
+        aria-describedby={error ? 'find-id-error' : undefined}
+        aria-invalid={Boolean(error)}
+        placeholder="car-4"
+        onChange={(event) => {
+          setId(event.target.value)
+          setError(null)
+        }}
+      />
+      <button className="secondary" type="submit" disabled={busy}>
+        {t(busy ? 'loadingCars' : 'findById')}
+      </button>
+      {error && (
+        <p id="find-id-error" role="alert">
+          {t(error)}
+        </p>
+      )}
+    </form>
   )
 }
 
@@ -443,22 +577,13 @@ function About({ t, number }) {
           ))}
         </div>
       </section>
-      <div className="about-notes">
-        <section className="panel about-note">
-          <Icon name="shield" />
-          <div>
-            <h2>{t('demoTitle')}</h2>
-            <p>{t('demoBody')}</p>
-          </div>
-        </section>
-        <section className="panel about-note">
-          <Icon name="info" />
-          <div>
-            <h2>{t('aiTitle')}</h2>
-            <p>{t('aiBody')}</p>
-          </div>
-        </section>
-      </div>
+      <section className="panel about-note">
+        <Icon name="shield" />
+        <div>
+          <h2>{t('demoTitle')}</h2>
+          <p>{t('demoBody')}</p>
+        </div>
+      </section>
     </div>
   )
 }
